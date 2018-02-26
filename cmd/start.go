@@ -22,14 +22,19 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/Azure/full_autorest/model"
+	"github.com/marstr/guid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -40,6 +45,18 @@ const (
 	startPortDefault     = 80
 	startPortDescription = "The port that should be used to listen for requests."
 )
+
+const (
+	startLocalStorageLong        = "local-storage"
+	startLocalStorageShort       = "l"
+	startLocalStorageDescription = "The directory that will be used to store builds on the machine hosting this server."
+)
+
+var startLocalStorageDefault = path.Join(os.TempDir(), "full_autorest")
+
+// DefaultMaxBodySize is the largest body that will be accepted by and Full_AutoRest operation unless otherwise
+// specified.
+const DefaultMaxBodySize int64 = 1024 * 1024 * 5
 
 var startFlags = viper.New()
 
@@ -64,8 +81,53 @@ to quickly create a Cobra application.`,
 	},
 }
 
+// GenerateFormat creates an enumeration of the formats that the "generate" endpoint is
+// able to output.
+type GenerateFormat string
+
+// Enumerates all well-known Formats that the generate function can use as output.
+const (
+	GenerateFormatZip GenerateFormat = "zip"
+	GenerateFormatTar GenerateFormat = "tar"
+)
+
+// GenerateParameters encapsulates the expected information that is passed via the body of a request
+// to the `generate` endpoint.
+type GenerateParameters struct {
+	Format     GenerateFormat         `json:"format"`
+	Language   model.AutoRestLanguage `json:"language"`
+	InputFiles []string               `json:"inputFiles"`
+	Tag        string                 `json:"tag,omitempty"`
+	Flags      []string               `json:"flags"`
+}
+
+// NormalizeFlag ensures that a string is formatted to have exactly two dashes, so that
+func NormalizeFlag(val string) string {
+	trimmed := strings.TrimLeft(val, "-")
+	return "--" + trimmed
+}
+
 func handleGenerate(resp http.ResponseWriter, req *http.Request) {
-	log.Print("request received: generate")
+	reqID := guid.NewGUID()
+
+	log.Print("request received: generate\n\tid: ", reqID)
+
+	var parameters GenerateParameters
+
+	bodyContents, err := ioutil.ReadAll(io.LimitReader(req.Body, DefaultMaxBodySize))
+	if err != nil {
+		resp.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(resp, err)
+		return
+	}
+
+	if contentType := req.Header.Get("content-type"); strings.EqualFold(contentType, "application/json") {
+		if err = json.Unmarshal(bodyContents, &parameters); err != nil {
+			resp.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(resp, "unable to parse request body as JSON, or JSON didn't conform to the expected schema.")
+			return
+		}
+	}
 
 	const autorestTimeout = 5 * 60 * time.Second
 
@@ -107,5 +169,7 @@ func init() {
 	// startCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 
 	startCmd.Flags().IntP(startPortLong, startPortShort, startPortDefault, startPortDescription)
+	startCmd.Flags().StringP(startLocalStorageLong, startLocalStorageShort, startLocalStorageDefault, startLocalStorageDescription)
+
 	startFlags.BindPFlags(startCmd.Flags())
 }

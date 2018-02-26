@@ -8,13 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 )
 
 // InvokeAutoRest executes AutoRest on the local machine.
 func InvokeAutoRest(ctx context.Context, language AutoRestLanguage, inputFiles []string, options AutoRestOptions) error {
 	invoker := exec.CommandContext(ctx, "autorest")
 
-	invoker.Args = append(invoker.Args, string(language))
+	invoker.Args = append(invoker.Args, string(language.Normalized()))
 
 	if useVal, hasUseVal := options.Use(); hasUseVal {
 		invoker.Args = append(invoker.Args, fmt.Sprintf("--use=%q", useVal))
@@ -37,6 +38,13 @@ func InvokeAutoRest(ctx context.Context, language AutoRestLanguage, inputFiles [
 // AutoRestLanguage hosts the enumeration of the languages that
 // have a generator implemented for AutoRest.
 type AutoRestLanguage string
+
+// Normalized ensures that an instance of AutoRestLanguage has exactly two dashes
+// infront of it.
+func (arl AutoRestLanguage) Normalized() AutoRestLanguage {
+	trimmed := strings.TrimLeft(string(arl), "-")
+	return AutoRestLanguage("--" + trimmed)
+}
 
 // The items declared here enumerate the well-known language generators.
 // The intent is not necesarily to have a comprehensive list. New generators
